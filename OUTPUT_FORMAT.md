@@ -36,12 +36,14 @@ output                                    dict (5 keys)
 │   ├─ 'img'          Tensor [B, 3, H, W] float32   normalized RGB, ~[-1, 1]
 │   ├─ 'true_shape'   Tensor [B, 2]       int32     real (H, W) per image
 │   ├─ 'idx'          list[int]  len B              source-image index
-│   └─ 'instance'     list[str]  len B              source-image id, e.g. '0'
+│   ├─ 'instance'     list[str]  len B              source-image id, e.g. '0'
+│   └─ 'filename'     list[str]  len B              source-image filename, e.g. 'image_000001.jpg'
 ├─ 'view2'                                dict       same fields as view1
 │   ├─ 'img'          Tensor [B, 3, H, W] float32
 │   ├─ 'true_shape'   Tensor [B, 2]       int32
 │   ├─ 'idx'          list[int]  len B
-│   └─ 'instance'     list[str]  len B
+│   ├─ 'instance'     list[str]  len B
+│   └─ 'filename'     list[str]  len B
 ├─ 'pred1'                                dict       prediction for view1, in view1's frame
 │   ├─ 'pts3d'        Tensor [B, H, W, 3] float32   per-pixel 3D points
 │   └─ 'conf'         Tensor [B, H, W]    float32   per-pixel confidence (>= 1)
@@ -70,6 +72,12 @@ Not every field is consumed. Tracing `global_aligner` →
 Per-image resolution `(H, W)` is inferred from the **shape of `pred['pts3d']`**, not from
 `true_shape`.
 
+### Required for naming the outputs (not consumed by the GA itself)
+
+| Field | Role |
+|-------|------|
+| `view1['filename']`, `view2['filename']` | actual source-image filename per row (parallel to `idx`: `filename[b]` names image `idx[b]`). The geometry optimization ignores it, but `run_global_alignment.py` uses it to key every per-image field of `results.pth` (`pts3d[name]`, `poses[name]`, `focals[name]`, `confidence_masks[name]`) by image filename. Must exactly match the `NAME` field in COLMAP's `images.{txt,bin}` so downstream code needs no ordering assumptions. |
+
 ### Optional (color only)
 
 | Field | Role |
@@ -92,6 +100,8 @@ Provide them anyway to keep the format identical and tooling happy.
   `view2`/`pred2`. Index `b` of every tensor/list refers to the same pair.
 - **`idx` indexes into `[0, N)`** and labels which original image each row's view is.
   `edges = [(view1['idx'][b], view2['idx'][b]) for b in range(B)]`.
+- **`filename` is a function of `idx`.** Every row with the same `idx` must carry the
+  same `filename`, and it must equal the image's `NAME` in COLMAP's `images.{txt,bin}`.
 - **Symmetrization.** Mirror every pair. If you emit `(i, j)`, also emit `(j, i)` with
   the views swapped. This matches `make_pairs(..., symmetrize=True)`.
 - **Frames.** `pred1['pts3d']` is in view1's frame; `pred2['pts3d_in_other_view']` is
@@ -116,12 +126,14 @@ output = {
         'true_shape':  torch.tensor([[H, W]] * B, dtype=torch.int32),  # [B, 2] (ignored)
         'idx':         idx1,                  # list[int] len B
         'instance':    [str(i) for i in idx1],# list[str] len B (ignored)
+        'filename':    [names[i] for i in idx1],  # list[str] len B, COLMAP NAME per image
     },
     'view2': {
         'img':         imgs2,
         'true_shape':  torch.tensor([[H, W]] * B, dtype=torch.int32),
         'idx':         idx2,
         'instance':    [str(i) for i in idx2],
+        'filename':    [names[i] for i in idx2],
     },
     'pred1': {'pts3d':                pts3d_1,  # [B, H, W, 3] float32, view1 frame
               'conf':                 conf_1},  # [B, H, W]    float32, >= 1

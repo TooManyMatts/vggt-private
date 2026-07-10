@@ -29,6 +29,7 @@ Output:
 Example
 -------
 python export_pairwise_mm.py --scene_dir examples_mm/a01_ipad_lts_s06 --model 1b --checkpoint checkpoints/1b --output outputs/a01
+
 python export_pairwise_mm.py --scene_dir examples_mm/a01_ipad_lts_s06 --model 1b-commercial --checkpoint checkpoints/1b-commercial --output outputs/a01
 
 With --output <folder>, the result is saved to <folder>/<model>/pairwise_output.pth.
@@ -140,7 +141,7 @@ def crop_and_resize_to_dust3r(arr, coords, out_h, out_w, mode="bilinear"):
     return resized[0] if cropped.ndim == 2 else resized.permute(1, 2, 0)
 
 
-def build_pairwise_output(model, images, dtype, valid_coords, out_h, out_w, resolution=518):
+def build_pairwise_output(model, images, image_names, dtype, valid_coords, out_h, out_w, resolution=518):
     """Assemble the DUSt3R-format `output` dict by running VGGT once per pair.
 
     Emits a symmetrized complete graph: every ordered pair (i, j), i != j. VGGT
@@ -205,12 +206,14 @@ def build_pairwise_output(model, images, dtype, valid_coords, out_h, out_w, reso
             "true_shape": true_shape.clone(),
             "idx": view1_idx,
             "instance": [str(k) for k in view1_idx],
+            "filename": [image_names[k] for k in view1_idx],
         },
         "view2": {
             "img": torch.stack(view2_img).float(),
             "true_shape": true_shape.clone(),
             "idx": view2_idx,
             "instance": [str(k) for k in view2_idx],
+            "filename": [image_names[k] for k in view2_idx],
         },
         "pred1": {
             "pts3d": torch.stack(pts3d_1_list),
@@ -245,12 +248,14 @@ def main(args):
     vggt_fixed_resolution = 518
     img_load_resolution = 1024
     images, original_coords, image_path_list = load_images(args.scene_dir, img_load_resolution, device)
+    # COLMAP NAME per image (matches demo_colmap_mm.py's base_image_path_list).
+    image_names = [os.path.basename(path) for path in image_path_list]
 
     # Valid (non-padded) image box per image, scaled from the load grid to the 518 grid.
     valid_coords = original_coords[:, :4].cpu().numpy() * (vggt_fixed_resolution / img_load_resolution)
 
     output = build_pairwise_output(
-        model, images, dtype, valid_coords, args.out_h, args.out_w, vggt_fixed_resolution,
+        model, images, image_names, dtype, valid_coords, args.out_h, args.out_w, vggt_fixed_resolution,
     )
 
     if args.output_path:
